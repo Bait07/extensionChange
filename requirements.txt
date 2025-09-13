@@ -1,0 +1,29 @@
+# Dependencias principales del proyecto
+# Ejemplos de dependencias comunes:
+
+# Para desarrollo y testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+black>=22.0.0
+flake8>=5.0.0
+
+# Para manejo de datos
+pandas>=1.5.0
+numpy>=1.24.0
+
+# Para interfaz gráfica y manejo de imágenes
+pillow>=10.0.0
+tkinter-tooltip>=2.0.0
+
+# Para interfaces web (opcional)
+# flask>=2.0.0
+# fastapi>=0.100.0
+
+# Para manejo de archivos de configuración
+# pyyaml>=6.0
+# python-dotenv>=1.0.0
+
+# Para logging
+# loguru>=0.7.0
+
+# Agrega aquí las dependencias específicas de tu proyecto
