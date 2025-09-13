@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 import threading
+import os
 from typing import List, Optional
 
 from .image_converter import ImageConverter
@@ -21,12 +22,14 @@ class ImageConverterGUI:
         self.root = tk.Tk()
         self.converter = ImageConverter()
         self.selected_files = []
+        self.conversion_cancelled = False
+        self.start_time = None
         self.setup_gui()
     
     def setup_gui(self):
         """Configurar la interfaz gráfica."""
         self.root.title("Convertidor de Extensiones de Imágenes")
-        self.root.geometry("600x450")
+        self.root.geometry("700x450")
         self.root.resizable(True, True)
         
         # Configurar estilo
@@ -105,12 +108,28 @@ class ImageConverterGUI:
         # Botón de salir
         ttk.Button(action_frame, text="Salir", command=self.root.quit).pack(side=tk.LEFT)
         
-        # Sección 4: Barra de progreso
-        self.progress_var = tk.StringVar(value="Listo para convertir")
-        ttk.Label(main_frame, textvariable=self.progress_var).grid(row=4, column=0, columnspan=3, pady=(10, 5))
+        # Sección 4: Barra de progreso mejorada
+        progress_frame = ttk.Frame(main_frame)
+        progress_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 5))
+        progress_frame.columnconfigure(0, weight=1)
         
+        # Información principal de progreso
+        self.progress_var = tk.StringVar(value="Listo para convertir")
+        ttk.Label(progress_frame, textvariable=self.progress_var).grid(row=0, column=0, sticky=tk.W)
+        
+        # Información secundaria (porcentaje, tiempo, etc.)
+        self.progress_detail_var = tk.StringVar(value="")
+        ttk.Label(progress_frame, textvariable=self.progress_detail_var, 
+                 font=("Arial", 8), foreground="gray").grid(row=1, column=0, sticky=tk.W)
+        
+        # Barra de progreso
         self.progress_bar = ttk.Progressbar(main_frame, mode='determinate')
         self.progress_bar.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        # Botón de cancelar (inicialmente oculto)
+        self.cancel_button = ttk.Button(progress_frame, text="Cancelar", 
+                                       command=self.cancel_conversion, state="disabled")
+        self.cancel_button.grid(row=0, column=1, padx=(10, 0))
         
         
         # Inicializar interfaz
@@ -175,60 +194,181 @@ class ImageConverterGUI:
             messagebox.showwarning("Advertencia", "No hay archivos seleccionados.")
             return
         
-        # Deshabilitar botón durante conversión
-        self.convert_button.config(state="disabled")
+        # Verificar tamaño total de archivos
+        total_size = self.calculate_total_size()
+        if total_size > 500 * 1024 * 1024:  # 500MB
+            result = messagebox.askyesno(
+                "Archivos Grandes Detectados", 
+                f"Se detectaron archivos grandes ({self.format_size(total_size)}). "
+                f"La conversión puede tardar varios minutos.\n\n¿Deseas continuar?"
+            )
+            if not result:
+                return
         
-        # Limpiar resultados anteriores
-        self.results_text.delete(1.0, tk.END)
+        # Preparar para conversión
+        self.conversion_cancelled = False
+        self.start_time = None
+        
+        # Deshabilitar botón y habilitar cancelar
+        self.convert_button.config(state="disabled")
+        self.cancel_button.config(state="normal")
         
         # Iniciar conversión en hilo separado
         thread = threading.Thread(target=self.convert_files)
         thread.daemon = True
         thread.start()
     
+    def cancel_conversion(self):
+        """Cancelar la conversión en curso."""
+        self.conversion_cancelled = True
+        self.progress_var.set("Cancelando conversión...")
+    
+    def calculate_total_size(self):
+        """Calcular el tamaño total de los archivos seleccionados."""
+        total_size = 0
+        for file_path in self.selected_files:
+            try:
+                total_size += os.path.getsize(file_path)
+            except:
+                pass
+        return total_size
+    
+    def format_size(self, size_bytes):
+        """Formatear tamaño en bytes a formato legible."""
+        if size_bytes == 0:
+            return "0 B"
+        size_names = ["B", "KB", "MB", "GB"]
+        i = 0
+        while size_bytes >= 1024 and i < len(size_names) - 1:
+            size_bytes /= 1024.0
+            i += 1
+        return f"{size_bytes:.1f} {size_names[i]}"
+    
     def convert_files(self):
         """Convertir archivos (ejecutado en hilo separado)."""
+        import time
+        
         try:
             target_extension = self.target_var.get()
-            
             total_files = len(self.selected_files)
-            self.progress_bar.config(maximum=total_files)
-            self.progress_bar.config(value=0)
             
+            # Configurar barra de progreso
+            self.root.after(0, lambda: self.progress_bar.config(maximum=total_files, value=0))
+            self.root.after(0, lambda: self.progress_var.set(f"Preparando conversión de {total_files} archivos..."))
+            
+            # Registrar tiempo de inicio
+            self.start_time = time.time()
             success_count = 0
+            failed_count = 0
             
             for i, file_path in enumerate(self.selected_files):
-                # Actualizar progreso
-                self.root.after(0, lambda: self.progress_var.set(f"Convirtiendo {i+1}/{total_files}"))
-                self.root.after(0, lambda: self.progress_bar.config(value=i))
+                # Verificar si se canceló la conversión
+                if self.conversion_cancelled:
+                    self.root.after(0, lambda: self.progress_var.set("Conversión cancelada por el usuario"))
+                    break
+                
+                # Calcular progreso y tiempo estimado
+                current_progress = i + 1
+                percentage = (current_progress / total_files) * 100
+                
+                # Calcular tiempo estimado
+                elapsed_time = time.time() - self.start_time
+                if i > 0:
+                    avg_time_per_file = elapsed_time / i
+                    remaining_files = total_files - i
+                    estimated_remaining = avg_time_per_file * remaining_files
+                    time_str = self.format_time(estimated_remaining)
+                else:
+                    time_str = "Calculando..."
+                
+                # Actualizar interfaz
+                filename = os.path.basename(file_path)
+                self.root.after(0, lambda p=percentage, f=filename, t=time_str, curr=current_progress, total=total_files: 
+                    self.update_progress_display(p, f, t, curr, total))
                 
                 # Convertir archivo
-                if self.converter.convert_single_file(file_path, target_extension):
-                    success_count += 1
+                try:
+                    if self.converter.convert_single_file(file_path, target_extension):
+                        success_count += 1
+                    else:
+                        failed_count += 1
+                except Exception as e:
+                    failed_count += 1
+                    print(f"Error al convertir {file_path}: {e}")
+                
+                # Pequeña pausa para mantener la interfaz responsiva
+                time.sleep(0.01)
             
-            # Finalizar progreso
-            self.root.after(0, lambda: self.progress_bar.config(value=total_files))
-            self.root.after(0, lambda: self.progress_var.set(f"Conversión completada: {success_count}/{total_files} archivos"))
-            
-            # Mostrar mensaje final con información sobre subcarpetas
-            subfolders_info = ""
-            if success_count > 0:
-                summary = self.converter.get_conversion_summary()
-                subfolders = set(item['subfolder'] for item in summary['converted'])
-                if subfolders:
-                    subfolders_info = f"\n\nSubcarpetas creadas:\n" + "\n".join(f"📁 {subfolder}" for subfolder in sorted(subfolders))
-            
-            self.root.after(0, lambda: messagebox.showinfo(
-                "Conversión Completada", 
-                f"Se convirtieron exitosamente {success_count} de {total_files} archivos.{subfolders_info}"
-            ))
+            # Finalizar
+            if not self.conversion_cancelled:
+                # Actualizar barra al 100%
+                self.root.after(0, lambda: self.progress_bar.config(value=total_files))
+                
+                # Calcular tiempo total
+                total_time = time.time() - self.start_time
+                time_str = self.format_time(total_time)
+                
+                # Mostrar mensaje de éxito
+                self.root.after(0, lambda: self.show_success_message(success_count, failed_count, total_files, time_str))
             
         except Exception as e:
             self.root.after(0, lambda: messagebox.showerror("Error", f"Error durante la conversión: {e}"))
         
         finally:
-            # Rehabilitar botón
+            # Restaurar interfaz
             self.root.after(0, lambda: self.convert_button.config(state="normal"))
+            self.root.after(0, lambda: self.cancel_button.config(state="disabled"))
+    
+    def update_progress_display(self, percentage, filename, time_str, current, total):
+        """Actualizar la visualización de progreso."""
+        self.progress_var.set(f"Convirtiendo: {filename}")
+        self.progress_detail_var.set(f"Progreso: {current}/{total} ({percentage:.1f}%) - Tiempo restante: {time_str}")
+        self.progress_bar.config(value=current-1)
+    
+    def format_time(self, seconds):
+        """Formatear tiempo en segundos a formato legible."""
+        if seconds < 60:
+            return f"{seconds:.0f}s"
+        elif seconds < 3600:
+            minutes = seconds / 60
+            return f"{minutes:.1f}min"
+        else:
+            hours = seconds / 3600
+            return f"{hours:.1f}h"
+    
+    def show_success_message(self, success_count, failed_count, total_files, time_str):
+        """Mostrar mensaje de éxito detallado."""
+        # Información sobre subcarpetas
+        subfolders_info = ""
+        if success_count > 0:
+            summary = self.converter.get_conversion_summary()
+            subfolders = set(item['subfolder'] for item in summary['converted'])
+            if subfolders:
+                subfolders_info = f"\n\n📁 Subcarpetas creadas:\n" + "\n".join(f"   • {subfolder}" for subfolder in sorted(subfolders))
+        
+        # Mensaje principal
+        if failed_count == 0:
+            title = "✅ ¡Conversión Completada Exitosamente!"
+            message = f"""🎉 ¡Perfecto! Todos los archivos se convirtieron correctamente.
+
+📊 Resumen:
+   • Archivos convertidos: {success_count}/{total_files}
+   • Tiempo total: {time_str}
+   • Sin errores{subfolders_info}
+
+✨ Los archivos están listos para usar."""
+        else:
+            title = "⚠️ Conversión Completada con Advertencias"
+            message = f"""📋 Conversión finalizada con algunos problemas.
+
+📊 Resumen:
+   • Archivos convertidos: {success_count}/{total_files}
+   • Archivos fallidos: {failed_count}
+   • Tiempo total: {time_str}{subfolders_info}
+
+⚠️ Revisa los archivos fallidos e intenta nuevamente si es necesario."""
+        
+        messagebox.showinfo(title, message)
     
     
     def run(self):

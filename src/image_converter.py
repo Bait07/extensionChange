@@ -70,6 +70,7 @@ class ImageConverter:
         """
         Convertir un solo archivo a la nueva extensión.
         Crea automáticamente una subcarpeta con el nombre de la extensión.
+        Optimizado para manejar archivos grandes de manera eficiente.
         
         Args:
             source_path: Ruta del archivo original
@@ -102,17 +103,28 @@ class ImageConverter:
             # Crear ruta del archivo de destino
             target_path = output_dir / f"{source.stem}{target_extension}"
             
-            # Copiar el archivo con la nueva extensión
-            shutil.copy2(source_path, target_path)
+            # Verificar si el archivo de destino ya existe
+            if target_path.exists():
+                print(f"⚠️ Archivo ya existe, sobrescribiendo: {target_path.name}")
+            
+            # Copiar el archivo con la nueva extensión de manera eficiente
+            # Para archivos grandes, usar copyfileobj para mejor rendimiento
+            file_size = source.stat().st_size
+            if file_size > 50 * 1024 * 1024:  # 50MB
+                # Para archivos grandes, copiar en chunks
+                self._copy_large_file(source_path, str(target_path))
+            else:
+                # Para archivos pequeños, usar copy2 (preserva metadatos)
+                shutil.copy2(source_path, target_path)
             
             self.converted_files.append({
                 'original': source_path,
                 'converted': str(target_path),
                 'extension': target_extension,
-                'subfolder': str(output_dir)
+                'subfolder': str(output_dir),
+                'size': file_size
             })
             
-            print(f"✓ Convertido: {source.name} -> {subfolder_name}/{target_path.name}")
             return True
             
         except Exception as e:
@@ -122,6 +134,22 @@ class ImageConverter:
                 'error': str(e)
             })
             return False
+    
+    def _copy_large_file(self, source_path: str, target_path: str, chunk_size: int = 1024 * 1024):
+        """
+        Copiar archivos grandes en chunks para optimizar memoria.
+        
+        Args:
+            source_path: Ruta del archivo origen
+            target_path: Ruta del archivo destino
+            chunk_size: Tamaño del chunk en bytes (1MB por defecto)
+        """
+        with open(source_path, 'rb') as src, open(target_path, 'wb') as dst:
+            while True:
+                chunk = src.read(chunk_size)
+                if not chunk:
+                    break
+                dst.write(chunk)
     
     def convert_multiple_files(self, file_paths: List[str], target_extension: str) -> Tuple[int, int]:
         """

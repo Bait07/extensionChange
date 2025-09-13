@@ -47,7 +47,12 @@ python main.py --console
 - **Formatos soportados**: JPG, PNG, BMP, GIF, TIFF, WEBP
 - **Extensiones de destino**: .1, .2, .3, .4, .5, .6
 - **Conversión masiva**: Procesa múltiples archivos simultáneamente
-- **Interfaz intuitiva**: GUI fácil de usar con barra de progreso
+- **Organización automática**: Crea subcarpetas organizadas por extensión
+- **Interfaz intuitiva**: GUI fácil de usar con barra de progreso avanzada
+- **Manejo de archivos grandes**: Optimizado para carpetas de 200MB+ 
+- **Progreso detallado**: Muestra porcentaje, tiempo estimado y archivo actual
+- **Cancelación**: Opción para cancelar la conversión en cualquier momento
+- **Mensajes de éxito**: Reportes detallados con estadísticas completas
 
 ## Estructura del proyecto
 
